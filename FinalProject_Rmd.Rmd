@@ -1,0 +1,174 @@
+---
+title: "FinalProject"
+author: "Stefan Haugen"
+date: "5/2/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+sheet_names2 <- excel_sheets("~/Desktop/18MAR17.xls")
+sheets2 <- 1:length(sheet_names2)
+columns <- c("Filename","Sample Type","Sample Name","Integ. Type","Area","ISTD Area","Area Ratio","Amount1","Amount2","%Diff","%RSD-AMT", "Peak Status", "Level", "Units","RT","Sample ID")
+
+read_excel("~/Desktop/18MAR17.xls", skip = 5, col_types = NULL)
+
+workbook18 <- lapply(sheets2, function(x) read_excel("~/Desktop/18MAR17.xls", sheet = x, skip = 5, col_types = NULL, range = cell_cols("C:G")))
+
+
+names(workbook18) <- sheet_names2
+library(tidyverse)
+
+bind_rows(workbook18)
+bind_rows(workbook18,
+          .id = "lipid") -> compiled_18
+
+select(compiled_18, lipid, `Curve Index`, X__1) -> compiled_18n
+na.omit(compiled_18n) -> clean_comp
+
+colnames(clean_comp) <- c("Lipid_Fraction", "Sample", "Area_Ratio")
+clean_comp[-c(1,2), ]
+
+clean_comp[ grep("iso", clean_comp$Sample, invert = TRUE) , ] -> clean_comp2
+
+clean_comp2[-1,] -> clean_comp3
+
+#now there are only CE TG FFA PL values with Area Ratios each but there are still
+#headers between lipid fractions that need to be removed "Sample Name"
+
+clean_comp3[!grepl("Sample Name", clean_comp3$Sample),] -> clean_comp4
+
+#CE_1-9 need to be subtracted by CE_10, same for each fraction (TG, FFA, PL)
+#for each lipid. 
+#the variable 'bylipid' is a clean data frame grouped by lipid.
+
+group_by(clean_comp4, Lipid_Fraction) -> bylipid
+
+#CE1-9 to be subtracted by C10
+list(bylipid[2:10,3])
+#change Area_Ratio to numeric vector
+transform(bylipid, Area_Ratio = as.numeric(Area_Ratio)) -> bylipid2
+#alter to a tibble
+transform(bylipid2, Area_Ratio = as.numeric(Area_Ratio)) -> num_lipids
+as.data.frame(num_lipids) -> num_lipids2
+tbl_df(num_lipids2) -> num_lipids3
+tbl_df(num_lipids3) -> bylipid_2
+bylipid_2 %>% group_by(Lipid_Fraction)
+bylipid_2 %>% group_by(Lipid_Fraction) -> bylipid_3
+
+#bylipid3 now has Area_Ratio as numeric vector
+
+#!! close!
+
+
+
+ce_pbs <- list(c(bylipid_3[1,3], bylipid_3[11,3], bylipid_3[21,3], bylipid_3[31,3]))
+
+select_first <- function (x) {
+  x[1]
+ }
+
+select_second <- function (x) {
+  x[2]
+}
+spread(clean_comp4, Sample, Area_Ratio)
+
+separate(clean_comp4, Sample, c("Frac", "Sample"), sep = "_")
+#to preserve numeric vectors
+separate(bylipid_3, Sample, c("Frac", "Sample"), sep = "_")
+separate(bylipid_3, Sample, c("Frac", "Sample"), sep = "_") -> spread_1
+spread(spread_1, Sample, Area_Ratio) -> tidy_lip
+tidy_lip %>% mutate(corrected_1 = `1`-`10`, corrected_2 = `2`-`10`, corrected_3 = `3` - `10`, corrected_4 = `4` - `10`, corrected_5 = `5` - `10`, corrected_6 = `6` - `10`, corrected_7 = `7` - `10`, corrected_8 = `8`-`10`, corrected_9 = `9`-`10`) -> tidy_lip2
+
+#data is now fully tidy and has corrected PB columns included
+#removed original columns...
+
+tidy_lip2 %>% select(Lipid_Fraction, Frac, corrected_1,corrected_2,corrected_3,corrected_4,corrected_5,corrected_6, corrected_7, corrected_8, corrected_9) -> tidy_lip3
+#as tidy_lip3
+#need to change column names to more appropiate headings
+
+names(tidy_lip3) <- c("Lipid_Name", "Lip_Fraction", "1", "2", "3", "4", "5", "6", "7", "8", "9") -> tidy_lip4
+
+tidy_lip3 %>% group_by(Lipid_Name, Lip_Fraction) -> tidy_lip4
+
+#math to get value prior to dilution correction
+tidy_lip4 %>% filter(Lipid_Name == "12_0") %>% mutate("1" = (((`1`)/(.0087)/199)))
+#Works!! but there must be better way
+tidy_lip4 %>% filter(Lipid_Name == "12_0") -> lipid_12
+lipid_12[3:11]
+lip_12 <- function(x) {
+  (((x)/(.0087)/199))
+}
+lapply(lipid_12[3:11], lip_12)
+
+#somewhat combined. still need to make original lipid variable though
+tbl_df(lapply(lipid_12[3:11], lip_12))
+
+#!!completes the calculations on specific fractions.
+cbind(lipid_12[1:2], lapply(lipid_12[3:11], lip_12)) -> data_12
+
+#14:0
+tidy_lip4 %>% filter(Lipid_Name == "14_0") -> lipid_14
+lip_14 <- function(x) {
+   (((x)/(.0077))/227)
+   }
+cbind(lipid_14[1:2], lapply(lipid_14[3:11], lip_14)) -> data_14
+
+#16:0
+tidy_lip4 %>% filter(Lipid_Name == "16_0") -> lipid_16
+lip_16 <- function(x) {
+      (((x)/(.0127))/255)
+      }
+cbind(lipid_16[1:2], lapply(lipid_16[3:11], lip_16)) -> data_16
+
+#18:0
+ tidy_lip4 %>% filter(Lipid_Name == "18_0") -> lipid_18
+ lip_18 <- function(x) {
+      (((x)/(.0131))/283)
+      }
+cbind(lipid_18[1:2], lapply(lipid_18[3:11], lip_18)) -> data_18
+
+#joining all data frames
+full_join(data_12,data_14) -> firstframe
+full_join(data_16,data_18) -> secondframe
+full_join(firstframe, secondframe) -> calc_data
+
+#adjusting for extraction dilution
+dil_factor <- function(x) {
+  (((x)*2.5)/30)
+}
+
+#across all data
+cbind(calc_data[1:2], lapply(calc_data[3:11], dil_factor)) -> conc_data
+
+#remove negatives
+conc_data[conc_data < 0] <- "ND"
+
+#visualization
+unite(conc_data, "sample", Lipid_Name, Lip_Fraction, sep = " ") -> conc_data_t
+c("sample", "075-CA", "075-CV", "075-MV", "045-CA", "045-CV", "045-MV", "029-CA", "029-CV", "029-MV") -> names(conc_data_t)
+t(conc_data_t)
+
+tbl_df(conc_data_t) -> conc_data_1
+t(conc_data_1) -> conc_data_2
+colnames(conc_data_2) <- c("12:0_CE", "12:0_FFA", "12:0_PL", "12:0_TG", "14:0_CE", "14:0_FFA", "14:0_PL", "14:0_TG", "16:0_CE", "16:0_FFA", "16:0_PL", "16:0_TG", "18:0_CE", "18:0_FFA", "18:0_PL", "18:0_TG")
+
+conc_data_2 <- conc_data_2[-1, ]
+
+matrix_dat <- apply(conc_data_2, 2, as.numeric)
+#apply(conc_data_2, 2, as.numeric)
+#matrix4
+
+t(matrix_dat) -> matrix5
+heatmap(matrix5, Rowv = NA, Colv = NA, col = cm.colors(256), scale = "column", margins = c(5,10))
+
+colnames(matrix5) <- c("075-CA", "075-CV", "075-MV", "045-CA", "045-CV", "045-MV", "029-CA", "029-CV", "029-MV")
+t(matrix5) -> matrix6
+heatmap(matrix6, Rowv = NA, Colv = NA, col = cm.colors(256), scale = "column", margins = c(5,10))
+
+```
